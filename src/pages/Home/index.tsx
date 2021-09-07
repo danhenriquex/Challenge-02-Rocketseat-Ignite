@@ -28,23 +28,30 @@ const Home = (): JSX.Element => {
   console.log(cart);
 
   const cartItemsAmount = cart.reduce((sumAmount, product) => {
-    return { ...sumAmount, [product.id]: product.amount };
+    const newSumAmount = { ...sumAmount };
+    newSumAmount[product.id] = product.amount;
+
+    return newSumAmount;
   }, {} as CartItemsAmount);
 
   useEffect(() => {
     async function loadProducts() {
-      api.get("/products").then((response) => {
-        if (response.status === 200) {
-          setProducts(response.data);
-        }
-      });
+      const response = await api
+        .get<Product[]>("products")
+        .then((res) => res.data);
+
+      const data = response.map((product) => ({
+        ...product,
+        priceFormatted: formatPrice(product.price),
+      }));
+
+      setProducts(data);
     }
 
     loadProducts();
   }, []);
 
   function handleAddProduct(id: number) {
-    // TODO
     addProduct(id);
   }
 
@@ -54,7 +61,7 @@ const Home = (): JSX.Element => {
         <li key={product.id}>
           <img src={product.image} alt="Tênis de Caminhada Leve Confortável" />
           <strong>{product.title}</strong>
-          <span>{formatPrice(Number(product.price))}</span>
+          <span>{product.priceFormatted}</span>
           <button
             type="button"
             data-testid="add-product-button"

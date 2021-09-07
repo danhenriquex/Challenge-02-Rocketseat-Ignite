@@ -3,6 +3,7 @@ import {
   ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { toast } from "react-toastify";
@@ -18,11 +19,6 @@ interface UpdateProductAmount {
   amount: number;
 }
 
-interface StockInfo {
-  id: number;
-  amount: number;
-}
-
 interface CartContextData {
   cart: Product[];
   addProduct: (productId: number) => Promise<void>;
@@ -33,8 +29,6 @@ interface CartContextData {
 const CartContext = createContext<CartContextData>({} as CartContextData);
 
 export function CartProvider({ children }: CartProviderProps): JSX.Element {
-  const [stock, setStock] = useState<StockInfo[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Product[]>(() => {
     const storagedCart = localStorage.getItem("@RocketShoes:cart");
 
@@ -45,83 +39,71 @@ export function CartProvider({ children }: CartProviderProps): JSX.Element {
     return [];
   });
 
-  useEffect(() => {
-    async function loadStock() {
-      api.get("/stock").then((response) => {
-        if (response.status === 200) {
-          setStock(response.data);
-        }
-      });
-    }
-
-    loadStock();
-  }, []);
+  const prevCartRef = useRef<Product[]>();
 
   useEffect(() => {
-    async function loadProducts() {
-      api.get("/products").then((response) => {
-        if (response.status === 200) {
-          setProducts(response.data);
-        }
-      });
+    prevCartRef.current = cart;
+  });
+
+  const cartPreviousValue = prevCartRef.current ?? cart;
+
+  useEffect(() => {
+    if (cartPreviousValue !== cart) {
+      localStorage.setItem("@RocketShoes:cart", JSON.stringify(cart));
     }
-    loadProducts();
-  }, []);
+  }, [cart, cartPreviousValue]);
 
   const addProduct = async (productId: number) => {
     try {
-      // TODO
-
-      const productOnLocalStorage = cart.filter(
-        (item) => item.id === productId
+      const updatedCart = [...cart];
+      const productExist = updatedCart.find(
+        (product) => product.id === productId
       );
-      const productInStock = stock.filter((item) => item.id === productId);
-      const productToAdd = products.filter((item) => item.id === productId);
 
-      if (productOnLocalStorage.length) {
-        if (productOnLocalStorage[0].amount + 1 > productInStock[0].amount) {
-          throw new Error();
-        }
+      const stock = await api
+        .get<Stock>(`/stock/${productId}`)
+        .then((response) => response.data);
 
-        const newCart = cart.map((item) =>
-          item.id === productId ? { ...item, amount: item.amount + 1 } : item
-        );
+      const stockAmount = stock.amount;
+      const currentAmount = productExist ? productExist.amount : 0;
+      const amount = currentAmount + 1;
 
-        setCart(newCart);
-
-        localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart));
-
+      if (amount > stockAmount) {
+        toast.error("Quantidade solicitada fora de estoque");
         return;
       }
 
-      const newObj = {
-        amount: 1,
-        id: productToAdd[0].id,
-        image: productToAdd[0].image,
-        title: productToAdd[0].title,
-        price: productToAdd[0].price,
-      };
+      if (productExist) {
+        productExist.amount = amount;
+      } else {
+        const product = await api.get(`/products/${productId}`);
 
-      setCart([...cart, newObj]);
+        const newProduct = {
+          ...product.data,
+          amount: 1,
+        };
+        updatedCart.push(newProduct);
+      }
 
-      cart.push(newObj);
-
-      localStorage.setItem("@RocketShoes:cart", JSON.stringify(cart));
-    } catch (err) {
-      // TODO
-      console.error(err);
-
+      setCart(updatedCart);
+    } catch {
       toast.error("Erro na adição do produto");
     }
   };
 
   const removeProduct = (productId: number) => {
     try {
-      const newCart = cart.filter((item) => item.id !== productId);
+      const updatedCart = [...cart];
+      const productIndex = updatedCart.findIndex(
+        (product) => product.id === productId
+      );
 
-      setCart(newCart);
-
-      localStorage.setItem("@RocketShoes:cart", JSON.stringify(newCart));
+      if (productIndex >= 0) {
+        updatedCart.splice(productIndex, 1);
+        setCart(updatedCart);
+      } else {
+        throw Error();
+      }
     } catch {
       toast.error("Erro na remoção do produto");
     }
@@ -132,23 +114,32 @@ export function CartProvider({ children }: CartProviderProps): JSX.Element {
     amount,
   }: UpdateProductAmount) => {
     try {
-      const productInStock = stock.filter((item) => item.id === productId);
-
       if (amount <= 0) return;
 
-      if (amount > productInStock[0].amount) {
+      const stock = await api
+        .get<Stock>(`/stock/${productId}`)
+        .then((response) => response.data);
+
+      const stockAmount = stock.amount;
+
+      if (amount > stockAmount) {
         toast.error("Quantidade solicitada fora de estoque");
         return;
       }
 
-      const updateCart = cart.map((item) =>
-        item.id === productId ? { ...item, amount } : item
+      const updatedCart = [...cart];
+      const productExists = updatedCart.find(
+        (product) => product.id === productId
       );
 
-      setCart(updateCart);
-      localStorage.setItem("@RocketShoes:cart", JSON.stringify(updateCart));
+      if (productExists) {
+        productExists.amount = amount;
+        setCart(updatedCart);
+      } else {
+        throw Error();
+      }
     } catch {
-      toast.error("Erro na remoção do produto");
+      toast.error("Erro na alteração de quantidade do produto");
     }
   };
 
